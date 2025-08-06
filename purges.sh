@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kotaemon Project Cleanup Script
-# This script removes all automatically generated files and directories
+# This script removes automatically generated files and directories
 # to restore the project to source code mode.
 
 set -e  # Exit on any error
@@ -16,6 +16,33 @@ NC='\033[0m' # No Color
 # Global counters for summary
 TOTAL_FILES_DELETED=0
 TOTAL_DIRECTORIES_DELETED=0
+
+# Parse command line arguments
+CLEAN_EVERYTHING=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --everything)
+            CLEAN_EVERYTHING=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --everything    Remove ALL files including user data (dangerous!)"
+            echo "  --help, -h      Show this help message"
+            echo ""
+            echo "Default behavior: Preserves user data, removes only development artifacts"
+            echo "Use --everything to remove user data as well"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
 
 # Function to print colored output
 print_status() {
@@ -140,13 +167,43 @@ if [ ! -f "app.py" ] || [ ! -f "flowsettings.py" ]; then
     exit 1
 fi
 
+# Show mode and get confirmation
+if [ "$CLEAN_EVERYTHING" = true ]; then
+    echo ""
+    print_warning "⚠️  WARNING: Running in --everything mode!"
+    print_warning "   This will delete ALL user data including:"
+    print_warning "   - Uploaded documents and files"
+    print_warning "   - Chat conversations and history"
+    print_warning "   - User settings and configurations"
+    print_warning "   - Application data and databases"
+    echo ""
+    read -p "Are you sure you want to continue? (y/N): " confirm
+    
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_status "Cleanup cancelled by user"
+        exit 0
+    fi
+else
+    echo ""
+    print_status "Running in safe mode - user data will be preserved"
+    print_status "Use --everything flag to also remove user data"
+    echo ""
+fi
+
 print_status "Starting cleanup process..."
 
-# 1. Remove application data directories
-print_status "Step 1: Removing application data directories"
-safe_remove "ktem_app_data" "application data directory"
-safe_remove "gradio_tmp" "Gradio temporary files"
-safe_remove "storage" "storage directory"
+# 1. Remove application data directories (only in --everything mode)
+if [ "$CLEAN_EVERYTHING" = true ]; then
+    print_status "Step 1: Removing application data directories (user data)"
+    safe_remove "ktem_app_data" "application data directory"
+    safe_remove "gradio_tmp" "Gradio temporary files"
+    safe_remove "storage" "storage directory"
+else
+    print_status "Step 1: Skipping application data directories (preserving user data)"
+    print_status "   - ktem_app_data/ (user conversations, settings, uploaded files)"
+    print_status "   - gradio_tmp/ (temporary web interface files)"
+    print_status "   - storage/ (document storage and vector databases)"
+fi
 
 # 2. Remove installation directories
 print_status "Step 2: Removing installation directories"
@@ -260,11 +317,22 @@ if [ $TOTAL_FILES_DELETED -gt 0 ] || [ $TOTAL_DIRECTORIES_DELETED -gt 0 ]; then
 else
     print_status "No files or directories were found to delete"
 fi
+
+# Show mode information
+if [ "$CLEAN_EVERYTHING" = true ]; then
+    print_warning "Mode: Complete cleanup (user data removed)"
+else
+    print_success "Mode: Safe cleanup (user data preserved)"
+fi
 echo "=================="
 echo ""
 
 print_status "The project has been restored to source code mode."
-print_status "All automatically generated files and directories have been removed."
+if [ "$CLEAN_EVERYTHING" = true ]; then
+    print_status "All files including user data have been removed."
+else
+    print_status "Development artifacts removed, user data preserved."
+fi
 echo ""
 print_status "To start fresh, you can now:"
 print_status "1. Run the installation script: ./scripts/run_macos.sh (or run_linux.sh)"
