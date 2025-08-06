@@ -138,38 +138,74 @@ Use the provided cleanup script to restore the project to source code mode.
 
 #### Running the Cleanup Script
 
-**Linux/macOS:**
+The cleanup script has two modes:
+
+**Safe Mode (Default) - Preserves User Data:**
 ```bash
 # Make the script executable (first time only)
 chmod +x purges.sh
 
-# Run the cleanup script
+# Run in safe mode (preserves user data)
 ./purges.sh
+```
+
+**Complete Cleanup Mode - Removes Everything:**
+```bash
+# Remove ALL files including user data (dangerous!)
+./purges.sh --everything
+```
+
+**Help:**
+```bash
+# Show usage information
+./purges.sh --help
+```
+
+**Linux/macOS:**
+```bash
+# Safe mode (recommended)
+./purges.sh
+
+# Complete cleanup (removes user data)
+./purges.sh --everything
 ```
 
 **Windows:**
 ```cmd
-# Run with Git Bash or WSL
+# Safe mode (recommended)
 bash purges.sh
 
-# Or with PowerShell (if bash is available)
-bash purges.sh
+# Complete cleanup (removes user data)
+bash purges.sh --everything
 ```
+
+**Note**: The `--everything` flag will prompt for confirmation before removing user data.
 
 #### What the Cleanup Script Removes
 
-The `purges.sh` script removes:
+The `purges.sh` script has two modes with different behaviors:
 
-- **Application Data**: `ktem_app_data/`, `gradio_tmp/`, `storage/`
-- **Installation Artifacts**: `install_dir/`, `doc_env/`
-- **Python Artifacts**: `__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd`
-- **Build Artifacts**: `build/`, `dist/`, `*.egg-info/`
-- **Test Artifacts**: `.pytest_cache/`, `.coverage`, `htmlcov/`, `.tox/`
-- **Cache Directories**: `.theflow/`, `.ruff_cache/`, `.mypy_cache/`, `.pytype/`, `.pyre/`
-- **Environment Files**: `.env` (preserves `.env.example`)
+**Safe Mode (Default) - Preserves User Data:**
+- **Development Artifacts**: `__pycache__/`, `*.pyc`, `build/`, `dist/`, etc.
+- **Cache Directories**: `.theflow/`, `.ruff_cache/`, `.mypy_cache/`, etc.
 - **IDE Files**: `.idea/`, `.vscode/`, `*.swp`, `*.swo`
 - **OS Files**: `.DS_Store`, `Thumbs.db`
 - **Virtual Environments**: `venv/`, `.venv/`, `env/`
+- **Installation Artifacts**: `install_dir/`, `doc_env/`
+- **Environment Files**: `.env` (preserves `.env.example`)
+
+**Complete Cleanup Mode (`--everything`) - Removes Everything:**
+- **All of the above** PLUS:
+- **User Data (Permanently deleted):**
+  - **Uploaded Documents**: All files uploaded to the application
+  - **Chat Conversations**: Complete chat history and conversations
+  - **User Settings**: All user configurations and preferences
+  - **Application Databases**: SQLite databases with user data
+  - **Indexed Documents**: All document embeddings and search indices
+- **Application Data:**
+  - `ktem_app_data/` - Contains all user data, conversations, settings
+  - `gradio_tmp/` - Temporary files from the web interface
+  - `storage/` - Document storage and vector databases
 
 #### Cleanup Summary
 
