@@ -322,10 +322,10 @@ KH_REASONINGS = [
     "ktem.reasoning.react.ReactAgentPipeline",
     "ktem.reasoning.rewoo.RewooAgentPipeline",
 ]
-KH_REASONINGS_USE_MULTIMODAL = config("USE_MULTIMODAL", default=True, cast=bool)
+KH_REASONINGS_USE_MULTIMODAL = config("USE_MULTIMODAL", default=False, cast=bool)
 KH_VLM_ENDPOINT = "{0}/openai/deployments/{1}/chat/completions?api-version={2}".format(
     config("AZURE_OPENAI_ENDPOINT", default=""),
-    config("OPENAI_VISION_DEPLOYMENT_NAME", default="gpt-4.1"),
+    config("OPENAI_VISION_DEPLOYMENT_NAME", default="gpt-4o"),
     config("OPENAI_API_VERSION", default=""),
 )
 
@@ -357,6 +357,7 @@ USE_GLOBAL_GRAPHRAG = config("USE_GLOBAL_GRAPHRAG", default=True, cast=bool)
 USE_NANO_GRAPHRAG = config("USE_NANO_GRAPHRAG", default=False, cast=bool)
 USE_LIGHTRAG = config("USE_LIGHTRAG", default=True, cast=bool)
 USE_MS_GRAPHRAG = config("USE_MS_GRAPHRAG", default=True, cast=bool)
+HIDE_DEFAULT_INDICES = config("HIDE_DEFAULT_INDICES", default=True, cast=bool)
 
 GRAPHRAG_INDEX_TYPES = []
 
@@ -402,6 +403,5 @@ KH_INDICES = [
     },
     *GRAPHRAG_INDICES,
 ]
-
-KH_APP_NAME = config("KH_APP_NAME", default="Chatbot")
-KH_DISABLE_VECTOR_FILTERS = True
+if HIDE_DEFAULT_INDICES:
+    KH_INDICES = []
