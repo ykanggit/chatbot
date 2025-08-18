@@ -183,13 +183,36 @@ class IndexManager:
         """
         self.load_index_types()
 
+        hide_defaults = getattr(settings, "HIDE_DEFAULT_INDICES", False)
+
         for index in settings.KH_INDICES:
+            if hide_defaults:
+                # Skip building default indices when hidden
+                continue
             if not self.exists(name=index["name"]):
                 self.build_index(**index)
 
         with Session(engine) as sess:
             index_defs = sess.exec(select(Index))
+            hide_defaults = getattr(settings, "HIDE_DEFAULT_INDICES", True)
+            graph_types = getattr(settings, "GRAPHRAG_INDEX_TYPES", [])
+            default_names = {
+                "File Collection",
+                "GraphRAG Collection",
+                "LightRAG Collection",
+                "NanoGraphRAG Collection",
+            }
             for index_def in index_defs:
+                if hide_defaults:
+                    name = getattr(index_def, "name", None)
+                    idx_type = getattr(index_def, "index_type", None)
+                    if (
+                        name in default_names
+                        or (idx_type in graph_types)
+                        or (isinstance(idx_type, str) and ".graph." in idx_type)
+                    ):
+                        # Skip starting seeded default indices
+                        continue
                 self.start_index(**index_def.model_dump())
 
     @property
