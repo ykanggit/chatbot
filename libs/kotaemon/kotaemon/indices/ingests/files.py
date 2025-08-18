@@ -25,6 +25,9 @@ from kotaemon.loaders import (
     WebReader,
 )
 
+from kotaemon.loaders.openai_vision_image_reader import OpenAIVisionImageReader
+
+
 web_reader = WebReader()
 unstructured = UnstructuredReader()
 adobe_reader = AdobeReader()
@@ -47,11 +50,11 @@ KH_DEFAULT_FILE_EXTRACTORS: dict[str, BaseReader] = {
     ".doc": unstructured,
     ".html": HtmlReader(),
     ".mhtml": MhtmlReader(),
-    ".png": unstructured,
-    ".jpeg": unstructured,
-    ".jpg": unstructured,
-    ".tiff": unstructured,
-    ".tif": unstructured,
+    ".png": OpenAIVisionImageReader(),
+    ".jpeg": OpenAIVisionImageReader(),
+    ".jpg": OpenAIVisionImageReader(),
+    ".tiff": OpenAIVisionImageReader(),
+    ".tif": OpenAIVisionImageReader(),
     ".pdf": PDFThumbnailReader(),
     ".txt": TxtReader(),
     ".md": TxtReader(),

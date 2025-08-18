@@ -322,10 +322,10 @@ KH_REASONINGS = [
     "ktem.reasoning.react.ReactAgentPipeline",
     "ktem.reasoning.rewoo.RewooAgentPipeline",
 ]
-KH_REASONINGS_USE_MULTIMODAL = config("USE_MULTIMODAL", default=False, cast=bool)
+KH_REASONINGS_USE_MULTIMODAL = config("USE_MULTIMODAL", default=True, cast=bool)
 KH_VLM_ENDPOINT = "{0}/openai/deployments/{1}/chat/completions?api-version={2}".format(
     config("AZURE_OPENAI_ENDPOINT", default=""),
-    config("OPENAI_VISION_DEPLOYMENT_NAME", default="gpt-4o"),
+    config("OPENAI_VISION_DEPLOYMENT_NAME", default="gpt-4.1"),
     config("OPENAI_API_VERSION", default=""),
 )
 
@@ -402,3 +402,6 @@ KH_INDICES = [
     },
     *GRAPHRAG_INDICES,
 ]
+
+KH_APP_NAME = config("KH_APP_NAME", default="Chatbot")
+KH_DISABLE_VECTOR_FILTERS = True

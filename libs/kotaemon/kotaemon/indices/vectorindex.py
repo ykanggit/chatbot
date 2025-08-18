@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import logging
 import uuid
 from pathlib import Path
 from typing import Optional, Sequence, cast
@@ -13,6 +14,9 @@ from kotaemon.storages import BaseDocumentStore, BaseVectorStore
 
 from .base import BaseIndexing, BaseRetrieval
 from .rankings import BaseReranking, LLMReranking
+
+logger = logging.getLogger(__name__)
+
 
 VECTOR_STORE_FNAME = "vectorstore"
 DOC_STORE_FNAME = "docstore"
@@ -117,6 +121,8 @@ class VectorRetrieval(BaseRetrieval):
     """Retrieve list of documents from vector store"""
 
     vector_store: BaseVectorStore
+    # Optional: allow passing collection names from UI when backend supports multiple collections
+    collection_name: str | None = None
     doc_store: Optional[BaseDocumentStore] = None
     embedding: BaseEmbeddings
     rerankers: Sequence[BaseReranking] = []
@@ -146,6 +152,150 @@ class VectorRetrieval(BaseRetrieval):
         if top_k is None:
             top_k = self.top_k
 
+        # DEBUG: print collection name/index coming from UI/settings and actual backend collection
+        try:
+            backend_collection = getattr(self.vector_store, "_collection", None)
+            backend_collection_name = getattr(backend_collection, "name", None)
+        except Exception:
+            backend_collection_name = None
+
+        # Derive docstore collection/index name robustly across implementations
+        docstore_collection_name = None
+        try:
+            ds = self.doc_store
+            if ds is not None:
+                # Common attributes across docstores:
+                # - LanceDBDocumentStore: collection_name
+                # - ElasticsearchDocumentStore: index_name
+                # - SimpleFileDocumentStore: _collection_name
+                docstore_collection_name = (
+                    getattr(ds, "collection_name", None)
+                    or getattr(ds, "index_name", None)
+                    or getattr(ds, "_collection_name", None)
+                )
+                if docstore_collection_name is None:
+                    # As a last resort, look for an underlying collection object
+                    ds_collection = getattr(ds, "_collection", None)
+                    docstore_collection_name = getattr(ds_collection, "name", None)
+        except Exception:
+            pass
+
+        # collection_name can be provided via UI/settings and passed through when constructing this component
+        if self.collection_name or backend_collection_name or docstore_collection_name:
+            # Try to derive vector store info (path, collection)
+            try:
+                vs_collection_name = (
+                    getattr(self.vector_store, "_collection_name", None)
+                    or backend_collection_name
+                )
+                vs_path = (
+                    getattr(self.vector_store, "_path", None)
+                    or getattr(self.vector_store, "path", None)
+                )
+            except Exception:
+                vs_collection_name = backend_collection_name
+                vs_path = None
+
+            # Try to derive docstore path
+            try:
+                ds = self.doc_store
+                ds_path = None
+                if ds is not None:
+                    ds_path = getattr(ds, "db_uri", None) or getattr(ds, "_path", None)
+            except Exception:
+                ds_path = None
+
+            print(
+                f"[info] Using vector store: cls={type(self.vector_store).__name__} "
+                f"path={vs_path} (collection={vs_collection_name})"
+            )
+            print(
+                f"[info] Using doc store:    cls={type(self.doc_store).__name__ if self.doc_store else None} "
+                f"path={ds_path} (collection={docstore_collection_name})"
+            )
+            # Keep original concise line
+            print(
+                f"[VectorRetrieval] Using collection: declared={self.collection_name} "
+                f"backend={backend_collection_name} "
+                f"docstore={docstore_collection_name}"
+            )
+            # If LanceDB is used for docstore, list tables and sample a row
+            try:
+                if ds_path:
+                    import lancedb  # type: ignore
+
+                    _db = lancedb.connect(str(ds_path))
+                    tbls = _db.table_names()
+                    print(f"[diag] LanceDB tables at {ds_path}: {tbls}")
+                    if docstore_collection_name in tbls:
+                        print(f"[diag] Docstore collection '{docstore_collection_name}' exists.")
+                    for t in tbls[:3]:
+                        try:
+                            table = _db.open_table(t)
+                            sample = table.search().limit(1).to_list()
+                            print(f"[diag] Table '{t}' sample row: {sample[0] if sample else '<empty>'}")
+                        except Exception as e:
+                            print(f"[diag] Could not sample table '{t}': {e}")
+            except Exception as e:
+                print(f"[diag] Could not inspect LanceDB docstore: {e}")
+
+        # Optional diagnostics: attempt to count vectors in the vector store
+        try:
+            cnt_fn = getattr(self.vector_store, "count", None)
+            if callable(cnt_fn):
+                _vs_count = cnt_fn()
+                print(f"[diag] Vector store count: {_vs_count}")
+                if _vs_count == 0:
+                    # If Chroma is used and path is known, list collections for hints
+                    try:
+                        import chromadb  # type: ignore
+
+                        _vs_path = (
+                            getattr(self.vector_store, "_path", None)
+                            or getattr(self.vector_store, "path", None)
+                        )
+                        if _vs_path:
+                            _client = chromadb.PersistentClient(path=str(_vs_path))
+                            cols = _client.list_collections()
+                            names = [getattr(c, "name", "unknown") for c in cols]
+                            print(f"[diag] Found {len(cols)} Chroma collections at path={_vs_path}: {names}")
+                            for c in cols[:5]:
+                                try:
+                                    print(f"[diag] Collection '{getattr(c, 'name', 'unknown')}' count: {c.count()}")
+                                except Exception as e:
+                                    print(f"[diag] Could not count collection '{getattr(c, 'name', 'unknown')}': {e}")
+                            # Show a quick directory listing
+                            try:
+                                from pathlib import Path as _Path
+
+                                entries = [str(p) for p in list(_Path(_vs_path).glob('*'))[:10]]
+                                print(f"[diag] Vectorstore directory entries (first 10): {entries}")
+                            except Exception as e:
+                                print(f"[diag] Could not list vectorstore directory: {e}")
+                    except Exception as e:
+                        print(f"[diag] Could not list Chroma collections: {e}")
+        except Exception as e:
+            print(f"[diag] Could not count vector store: {e}")
+
+        # Optionally disable metadata filters before querying vector store.
+        # Ways to enable:
+        #  - Pass one of these kwargs to VectorRetrieval.run(...):
+        #      disable_filters=True | ignore_filters=True | disable_metadata_filters=True
+        #  - Or set in flowsettings.py: KH_DISABLE_VECTOR_FILTERS = True
+        try:
+            disable_filters = (
+                bool(kwargs.pop("disable_filters", False))
+                or bool(kwargs.pop("ignore_filters", False))
+                or bool(kwargs.pop("disable_metadata_filters", False))
+                or bool(getattr(flowsettings, "KH_DISABLE_VECTOR_FILTERS", False))
+            )
+        except Exception:
+            disable_filters = False
+
+        if disable_filters and "filters" in kwargs:
+            removed_filters = kwargs.pop("filters", None)
+            print(f"[diag] Metadata filters disabled; removed filters={removed_filters}")
+
         do_extend = kwargs.pop("do_extend", False)
         thumbnail_count = kwargs.pop("thumbnail_count", 3)
 
@@ -166,11 +316,74 @@ class VectorRetrieval(BaseRetrieval):
         emb: list[float]
 
         if self.retrieval_mode == "vector":
+            print(f'Creating embedding for text: {text}, top_k: {top_k_first_round}, scope: {scope}, vectorstore: {type(self.vector_store).__name__}')
+            logger.info(f'Creating embedding for text: {text}, top_k: {top_k_first_round}, scope: {scope}')
             emb = self.embedding(text)[0].embedding
+            try:
+                print(f"[diag] Query embedding length: {len(emb)}")
+                print(f"[diag] Query embedding preview (first 8): {emb[:8]}")
+            except Exception:
+                pass
+            print(f"[diag] Vector store query kwargs preview: scope_len={len(scope) if scope else 0}, do_extend={do_extend}, top_k_first_round={top_k_first_round}")
+            # Optional: introspect underlying Chroma collection
+            try:
+                _collection = getattr(self.vector_store, "_collection", None)
+                if _collection is not None:
+                    print(f"[diag] Chroma collection name: {getattr(_collection, 'name', 'unknown')}")
+                    try:
+                        print(f"[diag] Chroma collection count: {_collection.count()}")
+                    except Exception as e:
+                        print(f"[diag] Could not count via collection.count(): {e}")
+                    try:
+                        sample = _collection.get(limit=3)
+                        _ids = sample.get("ids", [])
+                        _mds = sample.get("metadatas", [])
+                        print(f"[diag] Sample ids (up to 3): {_ids}")
+                        print(f"[diag] Sample metadata (up to 3): {_mds}")
+                        try:
+                            emb_sample = _collection.get(limit=1, include=['embeddings'])
+                            _embs = emb_sample.get('embeddings', None)
+                            dim = None
+                            if _embs is not None:
+                                try:
+                                    # Case: list/tuple of vectors
+                                    if isinstance(_embs, (list, tuple)):
+                                        if len(_embs) > 0 and _embs[0] is not None:
+                                            vec0 = _embs[0]
+                                            dim = len(vec0) if hasattr(vec0, '__len__') else None
+                                    # Case: numpy array or similar (e.g., shape (1, D) or (D,))
+                                    elif hasattr(_embs, 'shape'):
+                                        shape = getattr(_embs, 'shape', None)
+                                        if shape:
+                                            dim = shape[-1] if len(shape) >= 1 else None
+                                except Exception:
+                                    dim = None
+                            if dim is not None:
+                                print(f"[diag] Collection embedding dimension: {dim}")
+                            else:
+                                print(f"[diag] Embeddings present but could not determine dimension; type={type(_embs)}")
+                        except Exception as e:
+                            print(f"[diag] Could not fetch embeddings to determine dimension: {e}")
+                    except Exception as e:
+                        print(f"[diag] Could not fetch sample from Chroma: {e}")
+                else:
+                    print("[diag] Could not access underlying Chroma collection object on vector store.")
+            except Exception as e:
+                print(f"[diag] Error introspecting Chroma collection: {e}")
+            # Print exact kwargs before querying vector store
+            try:
+                _query_kwargs = {"top_k": top_k_first_round, "doc_ids": scope, **kwargs}
+                _safe_query_kwargs = {k: v for k, v in _query_kwargs.items() if k != "embedding"}
+                print(f"[diag] vector_store.query kwargs: {_safe_query_kwargs}")
+                print(f"[diag] vector_store.query embedding_len={len(emb)}")
+            except Exception:
+                pass
             _, scores, ids = self.vector_store.query(
                 embedding=emb, top_k=top_k_first_round, doc_ids=scope, **kwargs
             )
             docs = self.doc_store.get(ids)
+            logger.info(f'Retrieved {len(docs)} documents from vector store')
+            print(f'Retrieved {len(docs)} documents from vector store')
             result = [
                 RetrievedDocument(**doc.to_dict(), score=score)
                 for doc, score in zip(docs, scores)
@@ -186,6 +399,11 @@ class VectorRetrieval(BaseRetrieval):
         elif self.retrieval_mode == "hybrid":
             # similarity search section
             emb = self.embedding(text)[0].embedding
+            try:
+                print(f"[diag] Query embedding length: {len(emb)}")
+                print(f"[diag] Query embedding preview (first 8): {emb[:8]}")
+            except Exception:
+                pass
             vs_docs: list[RetrievedDocument] = []
             vs_ids: list[str] = []
             vs_scores: list[float] = []
@@ -196,6 +414,14 @@ class VectorRetrieval(BaseRetrieval):
                 nonlocal vs_ids
 
                 assert self.doc_store is not None
+                print(f"[diag] Vector store query kwargs preview: scope_len={len(scope) if scope else 0}, do_extend={do_extend}, top_k_first_round={top_k_first_round}")
+                try:
+                    _query_kwargs = {"top_k": top_k_first_round, "doc_ids": scope, **kwargs}
+                    _safe_query_kwargs = {k: v for k, v in _query_kwargs.items() if k != "embedding"}
+                    print(f"[diag] vector_store.query kwargs: {_safe_query_kwargs}")
+                    print(f"[diag] vector_store.query embedding_len={len(emb)}")
+                except Exception:
+                    pass
                 _, vs_scores, vs_ids = self.vector_store.query(
                     embedding=emb, top_k=top_k_first_round, doc_ids=scope, **kwargs
                 )
@@ -300,6 +526,22 @@ class VectorRetrieval(BaseRetrieval):
             # return output from raw retrieved thumbnails
             result = self._filter_docs(raw_thumbnail_docs, top_k=thumbnail_count)
 
+        try:
+            print(f"[result] Retrieved {len(result)} results:")
+            for i, doc in enumerate(result, 1):
+                try:
+                    text_val = getattr(doc, "text", None) or getattr(doc, "content", "") or ""
+                except Exception:
+                    text_val = ""
+                snippet = (text_val[:280] + "...") if isinstance(text_val, str) and len(text_val) > 280 else text_val
+                file_name = doc.metadata.get("file_name", "")
+                page = doc.metadata.get("page_label", "")
+                print("-" * 80)
+                print(f"[{i}] id={doc.doc_id} score={getattr(doc, 'score', None)} file_name={file_name} page={page}")
+                print(snippet)
+        except Exception as e:
+            print(f"[diag] Could not print results summary: {e}")
+
         return result
 
 
@@ -310,3 +552,4 @@ class TextVectorQA(BaseComponent):
     def run(self, question, **kwargs):
         retrieved_documents = self.retrieving_pipeline(question, **kwargs)
         return self.qa_pipeline(question, retrieved_documents, **kwargs)
+
